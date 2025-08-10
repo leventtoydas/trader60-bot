@@ -224,3 +224,4 @@ def main():
 
 if __name__=="__main__":
     main()
+send_telegram_message("✅ TRADER60 Bot aktif — test mesajı")
