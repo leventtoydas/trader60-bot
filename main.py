@@ -121,16 +121,16 @@ def analyze_once(symbol, tf):
     price=row["close"]; r=row["rsi"]; lb=row["bb_lower"]; mb=row["bb_mid"]; ub=row["bb_upper"]; e20=row["ema20"]; e50=row["ema50"]; m=row.get("macd",np.nan); ms=row.get("macd_signal",np.nan); mh=row.get("macd_hist",np.nan)
     stars="⭐"*max(1,min(3,int(conf)))
     msg = (
-        f"⏱ *TRADER60 — {tf} Sinyal*\n"
-        f"• *{symbol}* — Fiyat: `{price:.4f}`\n"
-        f"• Sinyal: *{('📈 ALIM' if side=='BUY' else '📉 SATIŞ')}* {stars}\n"
-        f"• Neden: {reason}\n"
-        f"• RSI: `{r:.1f}`\n"
-        f"• BB(L/M/U): `{lb:.4f}` / `{mb:.4f}` / `{ub:.4f}`\n"
-        f"• EMA20/EMA50: `{e20:.4f}` / `{e50:.4f}`\n"
-        f"• MACD/Signal/Hist: `{m:.4f}` / `{ms:.4f}` / `{mh:.4f}`\n"
-        f"_Zaman: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}_"
-    )
+    f"⏱ *TRADER60 — {tf} Sinyal*\n"
+    f"• *{symbol}* — Fiyat: `{price:.4f}`\n"
+    f"• Sinyal: *{('📈 ALIM' if side=='BUY' else '📉 SATIŞ')}* {stars}\n"
+    f"• Neden: {reason}\n"
+    f"• RSI: `{r:.1f}`\n"
+    f"• BB(L/M/U): `{lb:.4f}` / `{mb:.4f}` / `{ub:.4f}`\n"
+    f"• EMA20/EMA50: `{e20:.4f}` / `{e50:.4f}`\n"
+    f"• MACD/Signal/Hist: `{m:.4f}` / `{ms:.4f}` / `{mh:.4f}`\n"
+    f"_Zaman: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}_"
+)
     tg_send(msg); touch(symbol, tf, side, now); print("[OK] Sent", side, symbol, tf, now)
 
 def run_tf(tf):
