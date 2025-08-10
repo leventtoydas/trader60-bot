@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# TRADER60 PREMIUM - indicators & Telegram
+
 import os, time, json
 from datetime import datetime, timezone, timedelta
 import numpy as np, pandas as pd, yfinance as yf, requests, pytz
@@ -16,8 +18,9 @@ else:
 
 BOT_TOKEN=os.getenv("TELEGRAM_TOKEN","").strip()
 CHAT_ID=os.getenv("TELEGRAM_CHAT_ID","").strip()
-DEBOUNCE_MIN=int(os.getenv("DEBOUNCE_MIN","60"))
 TZ=pytz.timezone(os.getenv("APP_TIMEZONE","Europe/Istanbul"))
+DEBOUNCE_MIN=int(os.getenv("DEBOUNCE_MIN","60"))
+TIMEFRAMES=[t.strip() for t in os.getenv("TIMEFRAMES","5m,15m,30m,1h,4h").split(",") if t.strip()]
 
 DEFAULT_SYMBOLS=[
     "THYAO.IS","ASELS.IS","KCHOL.IS","TOASO.IS","TUPRS.IS","ULKER.IS","ENKAI.IS","GUBRF.IS","XU100.IS",
@@ -28,128 +31,176 @@ DEFAULT_SYMBOLS=[
     "PEPE-USD","AVAX-USD","ARB-USD","LTC-USD","HBAR-USD","WBTC-USD","XLM-USD","SHIB-USD"
 ]
 SYMBOLS=[s.strip() for s in os.getenv("SYMBOLS", ",".join(DEFAULT_SYMBOLS)).split(",") if s.strip()]
-TIMEFRAMES=[t.strip() for t in os.getenv("TIMEFRAMES","5m,15m,30m,1h,4h").split(",") if t.strip()]
 
 STATE_FILE="state.json"
-def load_state():
+def _load_state():
     try:
         if os.path.exists(STATE_FILE):
-            import json
-            return json.load(open(STATE_FILE,"r",encoding="utf-8"))
+            import json; return json.load(open(STATE_FILE,"r",encoding="utf-8"))
     except: pass
     return {}
-def save_state(st):
+def _save_state(st):
     try:
-        import json
-        json.dump(st, open(STATE_FILE,"w",encoding="utf-8"), ensure_ascii=False, indent=2)
+        import json; json.dump(st, open(STATE_FILE,"w",encoding="utf-8"), ensure_ascii=False, indent=2)
     except: pass
-STATE=load_state()
+STATE=_load_state()
 
-def can_send(symbol, tf, side, now):
-    key=f"{symbol}|{tf}|{side}"
+def can_send(symbol, tf, label, now):
+    key=f"{symbol}|{tf}|{label}"
     last=STATE.get(key)
     if last is None: return True
     last_dt=datetime.fromtimestamp(last, tz=timezone.utc).astimezone(TZ)
     return (now-last_dt)>=timedelta(minutes=DEBOUNCE_MIN)
-
-def touch(symbol, tf, side, now):
-    key=f"{symbol}|{tf}|{side}"
+def touch(symbol, tf, label, now):
+    key=f"{symbol}|{tf}|{label}"
     STATE[key]=now.astimezone(timezone.utc).timestamp()
-    save_state(STATE)
+    _save_state(STATE)
 
 def tg_send(text):
-    if not BOT_TOKEN or not CHAT_ID:
-        print("[FATAL] TELEGRAM_TOKEN/CHAT_ID eksik"); return
+    if not BOT_TOKEN or not CHAT_ID: print("[WARN] Missing TELEGRAM_TOKEN/CHAT_ID"); return
     try:
         url=f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
         requests.post(url, json={"chat_id":CHAT_ID,"text":text,"parse_mode":"Markdown"}, timeout=20)
     except Exception as e:
         print("[TG ERROR]",e)
 
-def rsi(series, length=14):
-    series=pd.to_numeric(series, errors="coerce")
-    delta=series.diff()
-    gain=delta.clip(lower=0)
-    loss=(-delta).clip(lower=0)
-    avg_gain=gain.ewm(alpha=1/length, min_periods=length, adjust=False).mean()
-    avg_loss=loss.ewm(alpha=1/length, min_periods=length, adjust=False).mean()
-    rs=avg_gain/avg_loss.replace(0, np.nan)
+def _ema(s,n): return pd.Series(pd.to_numeric(s, errors="coerce")).ewm(span=n, adjust=False, min_periods=n).mean()
+
+def rsi(s,n=14):
+    s=pd.to_numeric(s, errors="coerce")
+    d=s.diff(); up=d.clip(lower=0); dn=(-d).clip(lower=0)
+    au=up.ewm(alpha=1/n, adjust=False, min_periods=n).mean()
+    ad=dn.ewm(alpha=1/n, adjust=False, min_periods=n).mean()
+    rs=au/ad.replace(0,np.nan)
     return 100-(100/(1+rs))
 
-def bollinger(series, length=20, std_mult=2.0):
-    series=pd.to_numeric(series, errors="coerce")
-    ma=series.rolling(length, min_periods=length).mean()
-    sd=series.rolling(length, min_periods=length).std(ddof=0)
-    lower=ma-std_mult*sd
-    upper=ma+std_mult*sd
-    return lower, ma, upper
+def stoch(h,l,c,k=9,d=6):
+    ll=l.rolling(k, min_periods=k).min(); hh=h.rolling(k, min_periods=k).max()
+    kf=(c-ll)/(hh-ll)*100; ds=kf.rolling(d, min_periods=d).mean()
+    return kf, ds
+
+def stoch_rsi(c,n=14):
+    r=rsi(c,n); ll=r.rolling(n, min_periods=n).min(); hh=r.rolling(n, min_periods=n).max()
+    return (r-ll)/(hh-ll)
+
+def macd(c,fast=12,slow=26,signal=9):
+    ef=_ema(c,fast); es=_ema(c,slow)
+    line=ef-es; sig=line.ewm(span=signal, adjust=False, min_periods=signal).mean()
+    hist=line-sig; return line,sig,hist
+
+def adx(h,l,c,n=14):
+    plus_dm=(h.diff()).clip(lower=0); minus_dm=(-l.diff()).clip(lower=0)
+    tr1=(h-l); tr2=(h-c.shift()).abs(); tr3=(l-c.shift()).abs()
+    tr=pd.concat([tr1,tr2,tr3],axis=1).max(axis=1)
+    atr=tr.ewm(alpha=1/n, adjust=False, min_periods=n).mean()
+    plus_di=100*(plus_dm.ewm(alpha=1/n, adjust=False, min_periods=n).mean()/atr)
+    minus_di=100*(minus_dm.ewm(alpha=1/n, adjust=False, min_periods=n).mean()/atr)
+    dx=100*(plus_di-minus_di).abs()/(plus_di+minus_di)
+    adx=dx.ewm(alpha=1/n, adjust=False, min_periods=n).mean()
+    return adx, plus_di, minus_di
+
+def williams_r(h,l,c,n=14):
+    hh=h.rolling(n, min_periods=n).max(); ll=l.rolling(n, min_periods=n).min()
+    return (hh-c)/(hh-ll)*-100
+
+def cci(h,l,c,n=14):
+    tp=(h+l+c)/3; ma=tp.rolling(n, min_periods=n).mean(); md=(tp-ma).abs().rolling(n, min_periods=n).mean()
+    return (tp-ma)/(0.015*md)
+
+def atr(h,l,c,n=14):
+    tr1=(h-l); tr2=(h-c.shift()).abs(); tr3=(l-c.shift()).abs()
+    tr=pd.concat([tr1,tr2,tr3],axis=1).max(axis=1); return tr.ewm(alpha=1/n, adjust=False, min_periods=n).mean()
+
+def highs_lows_osc(h,l,c,n=14):
+    ll=l.rolling(n, min_periods=n).min(); hh=h.rolling(n, min_periods=n).max()
+    return (c-ll)/(hh-ll)*100
+
+def ultimate_osc(h,l,c,s1=7,s2=14,s3=28):
+    pc=c.shift(1); bp=c-pd.concat([l,pc],axis=1).min(axis=1)
+    tr=pd.concat([h,pc],axis=1).max(axis=1)-pd.concat([l,pc],axis=1).min(axis=1)
+    a1=bp.rolling(s1, min_periods=s1).sum()/tr.rolling(s1, min_periods=s1).sum()
+    a2=bp.rolling(s2, min_periods=s2).sum()/tr.rolling(s2, min_periods=s2).sum()
+    a3=bp.rolling(s3, min_periods=s3).sum()/tr.rolling(s3, min_periods=s3).sum()
+    return 100*(4*a1+2*a2+a3)/7
+
+def roc(c,n=12): return (c/c.shift(n)-1)*100
+
+def bull_bear_power(h,l,c,n=13):
+    ema=_ema(c,n); return h-ema, l-ema
 
 def fetch(symbol, tf):
     tfmap={"5m":("5m","10d"),"15m":("15m","30d"),"30m":("30m","60d"),"1h":("60m","60d"),"4h":("60m","60d")}
-    interval, period=tfmap.get(tf,("60m","60d"))
+    interval,period=tfmap.get(tf,("60m","60d"))
     try:
         df=yf.download(symbol, interval=interval, period=period, progress=False, auto_adjust=False, threads=True)
         if df is None or df.empty: return pd.DataFrame()
         df=df.rename(columns=str.lower)
-        if getattr(df.index,"tz",None) is not None:
-            df.index=df.index.tz_localize(None)
+        if getattr(df.index,"tz",None) is not None: df.index=df.index.tz_localize(None)
         if tf=="4h":
             df=df.resample("4H").agg({"open":"first","high":"max","low":"min","close":"last","volume":"sum"}).dropna()
-        df["close"]=pd.to_numeric(df["close"], errors="coerce")
-        df=df.dropna(subset=["close"])
+        for col in ["open","high","low","close"]:
+            df[col]=pd.to_numeric(df[col], errors="coerce")
+        df=df.dropna(subset=["close","high","low"])
         return df
     except Exception as e:
         print("[FETCH ERR]",symbol,tf,e); return pd.DataFrame()
 
-def analyze_once(symbol, tf):
-    now=datetime.now(TZ)
+def score_indicators(df):
+    h,l,c=df["high"],df["low"],df["close"]
+    out={}
+    rsi14=rsi(c,14); out["RSI(14)"]=("Al" if rsi14.iloc[-1]<=30 else ("Sat" if rsi14.iloc[-1]>=70 else "Nötr"), rsi14.iloc[-1])
+    kf,ds=stoch(h,l,c,9,6); stv=kf.iloc[-1]; out["STOCH(9,6)"]=("Aşırı Alış" if stv>=80 else ("Aşırı Satış" if stv<=20 else "Nötr"), stv)
+    srs=stoch_rsi(c,14).iloc[-1]*100; out["STOCHRSI(14)"]=("Aşırı Alış" if srs>=80 else ("Aşırı Satış" if srs<=20 else "Nötr"), srs)
+    ml,ms,mh=macd(c,12,26,9); out["MACD(12,26)"]=("Al" if mh.iloc[-1]>0 else ("Sat" if mh.iloc[-1]<0 else "Nötr"), mh.iloc[-1])
+    ad, pdi, mdi=adx(h,l,c,14); out["ADX(14)"]=("Al" if (ad.iloc[-1]>=25 and pdi.iloc[-1]>mdi.iloc[-1]) else ("Sat" if (ad.iloc[-1]>=25 and pdi.iloc[-1]<mdi.iloc[-1]) else "Nötr"), ad.iloc[-1])
+    wr=williams_r(h,l,c,14).iloc[-1]; out["Williams %R"]=("Aşırı Alış" if wr>=-20 else ("Aşırı Satış" if wr<=-80 else "Nötr"), wr)
+    cci14=cci(h,l,c,14).iloc[-1]; out["CCI(14)"]=("Al" if cci14>=100 else ("Sat" if cci14<=-100 else "Nötr"), cci14)
+    atr14=atr(h,l,c,14).iloc[-1]; atr_ratio=(atr14/max(c.iloc[-1],1e-9))*100; out["ATR(14)"]=("Düşük Hareketli" if atr_ratio<1.0 else "Yüksek Hareketli", atr14)
+    hlosc=highs_lows_osc(h,l,c,14).iloc[-1]; out["Highs/Lows(14)"]=("Al" if hlosc>=80 else ("Sat" if hlosc<=20 else "Nötr"), hlosc)
+    uo=ultimate_osc(h,l,c,7,14,28).iloc[-1]; out["Ultimate Oscillator"]=("Aşırı Alış" if uo>=70 else ("Aşırı Satış" if uo<=30 else "Nötr"), uo)
+    rc=roc(c,12).iloc[-1]; out["ROC(12)"]=("Al" if rc>0 else ("Sat" if rc<0 else "Nötr"), rc)
+    bull,bear=bull_bear_power(h,l,c,13); out["Bull/Bear Power(13)"]=("Al" if bull.iloc[-1]>0 and bear.iloc[-1]>0 else ("Sat" if bull.iloc[-1]<0 and bear.iloc[-1]<0 else "Nötr"), float(bull.iloc[-1])-float(bear.iloc[-1]))
+    return out
+
+def summarize(sc):
+    buy=sell=0; labels=[]
+    for name,(sig,val) in sc.items():
+        labels.append(f"{name}: {val:.3f} → {sig}")
+        if sig in ("Al","Aşırı Satış"): buy+=1
+        elif sig in ("Sat","Aşırı Alış"): sell+=1
+    summary = "Güçlü Al" if buy-sell>=4 else ("Al" if buy-sell>=2 else ("Güçlü Sat" if sell-buy>=4 else ("Sat" if sell-buy>=2 else "Nötr")))
+    return summary, buy, sell, labels
+
+def analyze_symbol(symbol, tf):
     df=fetch(symbol, tf)
-    if df.empty or len(df)<50:
-        print(f"[INFO] Skip {symbol} {tf}: not enough data"); return
-    close=df["close"]
-    rsi14=rsi(close,14)
-    bb_l, bb_m, bb_u=bollinger(close,20,2.0)
-    c=float(close.iloc[-1]) if not pd.isna(close.iloc[-1]) else np.nan
-    r=float(rsi14.iloc[-1]) if not pd.isna(rsi14.iloc[-1]) else np.nan
-    lb=float(bb_l.iloc[-1]) if not pd.isna(bb_l.iloc[-1]) else np.nan
-    ub=float(bb_u.iloc[-1]) if not pd.isna(bb_u.iloc[-1]) else np.nan
-    mb=float(bb_m.iloc[-1]) if not pd.isna(bb_m.iloc[-1]) else np.nan
-    side=None; reason=[]
-    if (not pd.isna(c)) and (not pd.isna(lb)) and (not pd.isna(r)) and (c<=lb) and (r<=30):
-        side="BUY"; reason=[f"Bollinger alt temas", f"RSI {r:.1f}"]
-    elif (not pd.isna(c)) and (not pd.isna(ub)) and (not pd.isna(r)) and (c>=ub) and (r>=70):
-        side="SELL"; reason=[f"Bollinger üst temas", f"RSI {r:.1f}"]
-    if side is None: return
-    if not can_send(symbol, tf, side, now): return
-    def fmt(x, d=4):
-        try: return f"{float(x):.{d}f}"
-        except Exception: return "nan"
-    stars="⭐"*2
-    msg=(f"⏱ *TRADER60 — {tf} Sinyal*
-"
-         f"• *{symbol}* — Fiyat: `{fmt(c)}`
-"
-         f"• Sinyal: *{('📈 ALIM' if side=='BUY' else '📉 SATIŞ')}* {stars}
-"
-         f"• Neden: {', '.join(reason)}
-"
-         f"• RSI: `{fmt(r,1)}`
-"
-         f"• BB(L/M/U): `{fmt(lb)}` / `{fmt(mb)}` / `{fmt(ub)}`
-"
-         f"_Zaman: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}_")
-    tg_send(msg); touch(symbol, tf, side, now); print("[OK]",symbol,tf,side,now)
+    if df.empty or len(df)<60: 
+        print(f"[INFO] Skip {symbol} {tf}: not enough data"); return None
+    sc=score_indicators(df)
+    summary,buy,sell,labels=summarize(sc)
+    price=df["close"].iloc[-1]
+    return summary,buy,sell,labels,price
 
 def run_tf(tf):
-    print("[RUN]",tf,datetime.now(TZ))
+    now=datetime.now(TZ)
     for s in SYMBOLS:
-        try: analyze_once(s, tf)
-        except Exception as e: print("[ANALYZE ERR]",s,tf,e)
+        try:
+            res=analyze_symbol(s, tf)
+            if not res: continue
+            summary,buy,sell,labels,price=res
+            if not can_send(s, tf, summary, now): continue
+            header=f"⏱ *TRADER60 — {tf}* | *{s}* | Fiyat: `{price:.4f}`"
+            body="
+".join([f"• {ln}" for ln in labels])
+            footer=f"*Özet:* {summary}  |  Al:{buy}  Sat:{sell}  Nötr:{max(0,12-buy-sell)}
+_Zaman: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}_"
+            msg=header+"
+"+body+"
+"+footer
+            tg_send(msg); touch(s, tf, summary, now); print("[OK]",s,tf,summary,now)
+        except Exception as e:
+            print("[ERR]",s,tf,e)
 
-def main():
-    if not BOT_TOKEN or not CHAT_ID:
-        print("[FATAL] TELEGRAM_TOKEN veya TELEGRAM_CHAT_ID eksik"); return
-    print("=== TRADER60 FINAL ROBUST start ==="); print("TFs:",TIMEFRAMES); print("Symbols:",len(SYMBOLS)); print("TZ:",TZ)
+def schedule():
     scheduler=BackgroundScheduler(jobstores={"default":MemoryJobStore()}, executors={"default":ThreadPoolExecutor(10),"processpool":ProcessPoolExecutor(2)}, job_defaults={"coalesce":True,"max_instances":3}, timezone=TZ)
     for tf in TIMEFRAMES:
         if tf=="5m": trig=CronTrigger(minute="*/5")
@@ -159,7 +210,13 @@ def main():
         elif tf=="4h": trig=CronTrigger(minute="0", hour="0,4,8,12,16,20")
         else: trig=CronTrigger(minute="0")
         scheduler.add_job(run_tf, trig, args=[tf], name=f"tf_{tf}")
-    scheduler.start(); tg_send("✅ TRADER60 bot başlatıldı (final robust build).")
+    scheduler.start(); return scheduler
+
+def main():
+    if not BOT_TOKEN or not CHAT_ID:
+        print("[FATAL] TELEGRAM_TOKEN/CHAT_ID eksik"); return
+    print("=== TRADER60 PREMIUM start ==="); print("TFs:",TIMEFRAMES); print("Symbols:",len(SYMBOLS)); print("TZ:",TZ)
+    scheduler=schedule(); tg_send("✅ TRADER60 PREMIUM başlatıldı.")
     try:
         while True: time.sleep(1)
     except KeyboardInterrupt:
