@@ -20,7 +20,7 @@ DEBOUNCE_MIN=int(os.getenv("DEBOUNCE_MIN","60"))
 TZ=pytz.timezone(os.getenv("APP_TIMEZONE","Europe/Istanbul"))
 
 DEFAULT_SYMBOLS=[
-    "THYAO.IS","ASELS.IS","KCHOL.IS","TOASO.IS","TUPRS.IS","ULKER.IS","ENKAI.IS","GUBRF.IS",
+    "THYAO.IS","ASELS.IS","KCHOL.IS","TOASO.IS","TUPRS.IS","ULKER.IS","ENKAI.IS","GUBRF.IS","XU100.IS",
     "USDTRY=X","EURTRY=X","EURUSD=X","GBPUSD=X","USDJPY=X",
     "^N225","^IXIC","^GSPC","^FCHI","^RUT","^FTSE","^GDAXI","^SSMI","^DJI","^WIG20",
     "GC=F","SI=F","BZ=F","CL=F",
@@ -67,6 +67,7 @@ def tg_send(text):
         print("[TG ERROR]",e)
 
 def rsi(series, length=14):
+    series=pd.to_numeric(series, errors="coerce")
     delta=series.diff()
     gain=delta.clip(lower=0)
     loss=(-delta).clip(lower=0)
@@ -76,6 +77,7 @@ def rsi(series, length=14):
     return 100-(100/(1+rs))
 
 def bollinger(series, length=20, std_mult=2.0):
+    series=pd.to_numeric(series, errors="coerce")
     ma=series.rolling(length, min_periods=length).mean()
     sd=series.rolling(length, min_periods=length).std(ddof=0)
     lower=ma-std_mult*sd
@@ -83,7 +85,7 @@ def bollinger(series, length=20, std_mult=2.0):
     return lower, ma, upper
 
 def fetch(symbol, tf):
-    tfmap={"5m":("5m","7d"),"15m":("15m","30d"),"30m":("30m","60d"),"1h":("60m","60d"),"4h":("60m","60d")}
+    tfmap={"5m":("5m","10d"),"15m":("15m","30d"),"30m":("30m","60d"),"1h":("60m","60d"),"4h":("60m","60d")}
     interval, period=tfmap.get(tf,("60m","60d"))
     try:
         df=yf.download(symbol, interval=interval, period=period, progress=False, auto_adjust=False, threads=True)
@@ -93,6 +95,8 @@ def fetch(symbol, tf):
             df.index=df.index.tz_localize(None)
         if tf=="4h":
             df=df.resample("4H").agg({"open":"first","high":"max","low":"min","close":"last","volume":"sum"}).dropna()
+        df["close"]=pd.to_numeric(df["close"], errors="coerce")
+        df=df.dropna(subset=["close"])
         return df
     except Exception as e:
         print("[FETCH ERR]",symbol,tf,e); return pd.DataFrame()
@@ -100,35 +104,38 @@ def fetch(symbol, tf):
 def analyze_once(symbol, tf):
     now=datetime.now(TZ)
     df=fetch(symbol, tf)
-    if df.empty or len(df)<50: return
+    if df.empty or len(df)<50:
+        print(f"[INFO] Skip {symbol} {tf}: not enough data"); return
     close=df["close"]
     rsi14=rsi(close,14)
     bb_l, bb_m, bb_u=bollinger(close,20,2.0)
-    idx=df.index[-1]
-    c=float(close.loc[idx])
-    r=float(rsi14.loc[idx]) if not np.isnan(rsi14.loc[idx]) else np.nan
-    lb=float(bb_l.loc[idx]) if not np.isnan(bb_l.loc[idx]) else np.nan
-    ub=float(bb_u.loc[idx]) if not np.isnan(bb_u.loc[idx]) else np.nan
-    mb=float(bb_m.loc[idx]) if not np.isnan(bb_m.loc[idx]) else np.nan
+    c=float(close.iloc[-1]) if not pd.isna(close.iloc[-1]) else np.nan
+    r=float(rsi14.iloc[-1]) if not pd.isna(rsi14.iloc[-1]) else np.nan
+    lb=float(bb_l.iloc[-1]) if not pd.isna(bb_l.iloc[-1]) else np.nan
+    ub=float(bb_u.iloc[-1]) if not pd.isna(bb_u.iloc[-1]) else np.nan
+    mb=float(bb_m.iloc[-1]) if not pd.isna(bb_m.iloc[-1]) else np.nan
     side=None; reason=[]
-    if not np.isnan(r) and not np.isnan(lb) and c<=lb and r<=30:
+    if (not pd.isna(c)) and (not pd.isna(lb)) and (not pd.isna(r)) and (c<=lb) and (r<=30):
         side="BUY"; reason=[f"Bollinger alt temas", f"RSI {r:.1f}"]
-    elif not np.isnan(r) and not np.isnan(ub) and c>=ub and r>=70:
+    elif (not pd.isna(c)) and (not pd.isna(ub)) and (not pd.isna(r)) and (c>=ub) and (r>=70):
         side="SELL"; reason=[f"Bollinger üst temas", f"RSI {r:.1f}"]
     if side is None: return
     if not can_send(symbol, tf, side, now): return
-    stars="⭐⭐"
+    def fmt(x, d=4):
+        try: return f"{float(x):.{d}f}"
+        except Exception: return "nan"
+    stars="⭐"*2
     msg=(f"⏱ *TRADER60 — {tf} Sinyal*
 "
-         f"• *{symbol}* — Fiyat: `{c:.4f}`
+         f"• *{symbol}* — Fiyat: `{fmt(c)}`
 "
          f"• Sinyal: *{('📈 ALIM' if side=='BUY' else '📉 SATIŞ')}* {stars}
 "
          f"• Neden: {', '.join(reason)}
 "
-         f"• RSI: `{(r if not np.isnan(r) else float('nan')):.1f}`
+         f"• RSI: `{fmt(r,1)}`
 "
-         f"• BB(L/M/U): `{(lb if not np.isnan(lb) else float('nan')):.4f}` / `{(mb if not np.isnan(mb) else float('nan')):.4f}` / `{(ub if not np.isnan(ub) else float('nan')):.4f}`
+         f"• BB(L/M/U): `{fmt(lb)}` / `{fmt(mb)}` / `{fmt(ub)}`
 "
          f"_Zaman: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}_")
     tg_send(msg); touch(symbol, tf, side, now); print("[OK]",symbol,tf,side,now)
@@ -142,7 +149,7 @@ def run_tf(tf):
 def main():
     if not BOT_TOKEN or not CHAT_ID:
         print("[FATAL] TELEGRAM_TOKEN veya TELEGRAM_CHAT_ID eksik"); return
-    print("=== TRADER60 FINAL start ==="); print("TFs:",TIMEFRAMES); print("Symbols:",len(SYMBOLS)); print("TZ:",TZ)
+    print("=== TRADER60 FINAL ROBUST start ==="); print("TFs:",TIMEFRAMES); print("Symbols:",len(SYMBOLS)); print("TZ:",TZ)
     scheduler=BackgroundScheduler(jobstores={"default":MemoryJobStore()}, executors={"default":ThreadPoolExecutor(10),"processpool":ProcessPoolExecutor(2)}, job_defaults={"coalesce":True,"max_instances":3}, timezone=TZ)
     for tf in TIMEFRAMES:
         if tf=="5m": trig=CronTrigger(minute="*/5")
@@ -152,7 +159,7 @@ def main():
         elif tf=="4h": trig=CronTrigger(minute="0", hour="0,4,8,12,16,20")
         else: trig=CronTrigger(minute="0")
         scheduler.add_job(run_tf, trig, args=[tf], name=f"tf_{tf}")
-    scheduler.start(); tg_send("✅ TRADER60 bot başlatıldı (final clean build).")
+    scheduler.start(); tg_send("✅ TRADER60 bot başlatıldı (final robust build).")
     try:
         while True: time.sleep(1)
     except KeyboardInterrupt:

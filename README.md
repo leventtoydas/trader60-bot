@@ -1,5 +1,5 @@
-# TRADER60 — Final Clean Build
-No pandas_ta. RSI & Bollinger via pandas/numpy. Python 3.10 pinned.
+# TRADER60 — Final Robust Build
+No pandas_ta. Strong NaN/None guards. Wider history windows. Python 3.10 pinned.
 
 Deploy:
 1) Upload all files to GitHub (overwrite previous).
