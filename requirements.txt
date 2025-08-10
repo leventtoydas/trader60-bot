@@ -1,9 +1,9 @@
 setuptools
 requests
-pandas
-numpy
+pandas==1.5.3
+numpy==1.23.5
 yfinance
-pandas_ta
+pandas_ta==0.3.14b0
 apscheduler
 python-dotenv
 pytz
