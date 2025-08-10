@@ -1,8 +1,7 @@
-# TRADER60 — Railway (Python 3.10 pinned)
+# TRADER60 — Fixed build (Python 3.10, pinned deps, string fix)
 
-Follow these steps:
-1) Upload files to your GitHub repo.
-2) In Railway: New Project → Deploy from GitHub.
-3) Add Variables: TELEGRAM_TOKEN, TELEGRAM_CHAT_ID (and optional SYMBOLS, TIMEFRAMES, DEBOUNCE_MIN).
-4) Settings → Deployments → Clear Cache.
-5) Press Deploy and watch Logs.
+Steps:
+1) Upload files to GitHub repo (overwrite existing).
+2) Railway → Settings → Deployments → Clear Cache.
+3) Variables: TELEGRAM_TOKEN, TELEGRAM_CHAT_ID (and optional SYMBOLS, TIMEFRAMES, DEBOUNCE_MIN).
+4) Redeploy. Check Logs for start message.
