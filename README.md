@@ -1,2 +1,2 @@
-# TRADER60 — PREMIUM (No pandas_ta)
-Deploy steps in Railway: upload, rebuild without cache, set TELEGRAM_* vars.
+# TRADER60 — PREMIUM Fixed
+Deploy: Upload, Rebuild without cache, set TELEGRAM_* vars. Strings assembled safely.

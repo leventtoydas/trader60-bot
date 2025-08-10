@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# TRADER60 PREMIUM - indicators & Telegram
+# TRADER60 PREMIUM - fixed string assembly (no unterminated strings)
 
 import os, time, json
 from datetime import datetime, timezone, timedelta
@@ -57,7 +57,9 @@ def touch(symbol, tf, label, now):
     _save_state(STATE)
 
 def tg_send(text):
-    if not BOT_TOKEN or not CHAT_ID: print("[WARN] Missing TELEGRAM_TOKEN/CHAT_ID"); return
+    if not BOT_TOKEN or not CHAT_ID: 
+        print("[WARN] Missing TELEGRAM_TOKEN/CHAT_ID"); 
+        return
     try:
         url=f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
         requests.post(url, json={"chat_id":CHAT_ID,"text":text,"parse_mode":"Markdown"}, timeout=20)
@@ -68,7 +70,7 @@ def _ema(s,n): return pd.Series(pd.to_numeric(s, errors="coerce")).ewm(span=n, a
 
 def rsi(s,n=14):
     s=pd.to_numeric(s, errors="coerce")
-    d=s.diff(); up=d.clip(lower=0); dn=(-d).clip(lower=0)
+    d=s.diff(); up=d.clip(lower=0); dn=(-d).clip(upper=0)
     au=up.ewm(alpha=1/n, adjust=False, min_periods=n).mean()
     ad=dn.ewm(alpha=1/n, adjust=False, min_periods=n).mean()
     rs=au/ad.replace(0,np.nan)
@@ -188,14 +190,12 @@ def run_tf(tf):
             if not res: continue
             summary,buy,sell,labels,price=res
             if not can_send(s, tf, summary, now): continue
-            header=f"⏱ *TRADER60 — {tf}* | *{s}* | Fiyat: `{price:.4f}`"
-            body="
-".join([f"• {ln}" for ln in labels])
-            footer=f"*Özet:* {summary}  |  Al:{buy}  Sat:{sell}  Nötr:{max(0,12-buy-sell)}
-_Zaman: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}_"
-            msg=header+"
-"+body+"
-"+footer
+            header = f"⏱ *TRADER60 — {tf}* | *{s}* | Fiyat: `{price:.4f}`"
+            body_lines = [f"• {ln}" for ln in labels]
+            body = "\n".join(body_lines)
+            footer = (f"*Özet:* {summary}  |  Al:{buy}  Sat:{sell}  Nötr:{max(0,12-buy-sell)}\n"
+                      f"_Zaman: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}_")
+            msg = "\n".join([header, body, footer])
             tg_send(msg); touch(s, tf, summary, now); print("[OK]",s,tf,summary,now)
         except Exception as e:
             print("[ERR]",s,tf,e)
@@ -215,8 +215,8 @@ def schedule():
 def main():
     if not BOT_TOKEN or not CHAT_ID:
         print("[FATAL] TELEGRAM_TOKEN/CHAT_ID eksik"); return
-    print("=== TRADER60 PREMIUM start ==="); print("TFs:",TIMEFRAMES); print("Symbols:",len(SYMBOLS)); print("TZ:",TZ)
-    scheduler=schedule(); tg_send("✅ TRADER60 PREMIUM başlatıldı.")
+    print("=== TRADER60 PREMIUM (fixed) start ==="); print("TFs:",TIMEFRAMES); print("Symbols:",len(SYMBOLS)); print("TZ:",TZ)
+    scheduler=schedule(); tg_send("✅ TRADER60 PREMIUM (fixed) başlatıldı.")
     try:
         while True: time.sleep(1)
     except KeyboardInterrupt:
