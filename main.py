@@ -5,9 +5,9 @@ import pandas as pd
 import time
 import requests
 
-# Varsayılan semboller — Railway'de SYMBOLS tanımlı değilse bunlar kullanılacak
+# Varsayılan semboller
 DEFAULT_SYMBOLS = [
-    # BIST Hisseleri
+    # BIST
     "THYAO.IS", "ASELS.IS", "KCHOL.IS", "TOASO.IS", "TUPRS.IS", "ULKER.IS", "ENKAI.IS", "GUBRF.IS",
     # Döviz
     "USDTRY=X", "EURTRY=X", "EURUSD=X", "GBPUSD=X", "USDJPY=X",
@@ -40,17 +40,17 @@ def send_telegram_message(message):
 
 def analyze_symbol(symbol, interval):
     try:
-        df = yf.download(symbol, period="7d", interval=interval)
+        df = yf.download(symbol, period="7d", interval=interval, auto_adjust=False)
         if df.empty:
             return None
         df["RSI"] = ta.rsi(df["Close"], length=14)
         bb = ta.bbands(df["Close"], length=20, std=2)
         df = pd.concat([df, bb], axis=1)
-        last = df.iloc[-1]
+        last = df.iloc[[-1]]
         signal = None
-        if last["RSI"] < 30 and last["Close"] <= last["BBL_20_2.0"]:
+        if last["RSI"].item() < 30 and last["Close"].item() <= last["BBL_20_2.0"].item():
             signal = "📉 *ALIM FIRSATI* (RSI < 30 & Alt Bollinger)"
-        elif last["RSI"] > 70 and last["Close"] >= last["BBU_20_2.0"]:
+        elif last["RSI"].item() > 70 and last["Close"].item() >= last["BBU_20_2.0"].item():
             signal = "📈 *SATIŞ FIRSATI* (RSI > 70 & Üst Bollinger)"
         return signal
     except Exception as e:
@@ -66,7 +66,8 @@ def main():
                     msg = f"⏱ *TRADER60 — {tf}*\n💹 *{symbol}*: {signal}"
                     send_telegram_message(msg)
                     print(msg)
-        time.sleep(300)  # 5 dakika bekle
+        time.sleep(300)
 
 if __name__ == "__main__":
     main()
+
