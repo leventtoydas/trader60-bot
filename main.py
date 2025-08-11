@@ -1,4 +1,22 @@
 import os
+import requests
+
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+def send_telegram_message(message):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
+    try:
+        requests.post(url, data=payload)
+        print("[INFO] Telegram mesajı gönderildi:", message)
+    except Exception as e:
+        print("[ERROR] Telegram gönderim hatası:", e)
+
+# Test mesajı gönder
+send_telegram_message("✅ TRADER60 Bot Railway üzerinde aktif!")
+
+import os
 import yfinance as yf
 import pandas as pd
 import requests
