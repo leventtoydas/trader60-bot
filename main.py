@@ -8,6 +8,19 @@ import pandas as pd
 import yfinance as yf
 import requests
 import pytz
+    # ENV kontrol + getMe
+    print("[BOOT] CHAT_ID:", CHAT_ID)
+    print("[BOOT] TOKEN tail:", (BOT_TOKEN[-8:] if BOT_TOKEN else ""))
+    try:
+        gm = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getMe", timeout=15)
+        print("[TG DEBUG] getMe status:", gm.status_code)
+        try:
+            print("[TG DEBUG] getMe resp:", gm.json())
+        except Exception:
+            print("[TG DEBUG] getMe text:", gm.text)
+    except Exception as e:
+        print("[TG ERROR] getMe exception:", e)
+
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.jobstores.memory import MemoryJobStore
@@ -82,13 +95,21 @@ def touch(symbol, tf, label, now):
     _save_state(STATE)
 
 # ==== Telegram ====
-def tg_send(text: str):
+def tg_send(text: str, use_markdown=True):
     if not BOT_TOKEN or not CHAT_ID:
         print("[FATAL] TELEGRAM_TOKEN/CHAT_ID eksik")
         return
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        requests.post(url, json={"chat_id":CHAT_ID,"text":text,"parse_mode":"Markdown"}, timeout=20)
+        payload = {"chat_id": CHAT_ID, "text": text}
+        if use_markdown:
+            payload["parse_mode"] = "Markdown"
+        r = requests.post(url, json=payload, timeout=20)
+        print("[TG DEBUG] status:", r.status_code)
+        try:
+            print("[TG DEBUG] resp:", r.json())
+        except Exception:
+            print("[TG DEBUG] text:", r.text)
     except Exception as e:
         print("[TG ERROR]", e)
 
