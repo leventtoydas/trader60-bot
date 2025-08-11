@@ -1,72 +1,43 @@
-import os
-import requests
+import os, requests, sys, json
 
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
-def send_telegram_message(message):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
-    try:
-        requests.post(url, data=payload)
-        print("[INFO] Telegram mesajı gönderildi:", message)
-    except Exception as e:
-        print("[ERROR] Telegram gönderim hatası:", e)
+def die(msg):
+    print(msg)
+    sys.exit(1)
 
-# Test mesajı gönder
-send_telegram_message("✅ TRADER60 Bot Railway üzerinde aktif!")
+# 1) Env doğrula (maskeli yazdır)
+if not TOKEN or not CHAT_ID:
+    die("[FATAL] TELEGRAM_TOKEN veya TELEGRAM_CHAT_ID boş!")
+print("[INFO] TOKEN: ****" + (TOKEN[-8:] if len(TOKEN) >= 8 else TOKEN))
+print("[INFO] CHAT_ID:", CHAT_ID)
 
-import os
-import yfinance as yf
-import pandas as pd
-import requests
-from datetime import datetime
+# 2) /getMe ile token geçerli mi?
+r = requests.get(f"https://api.telegram.org/bot{TOKEN}/getMe", timeout=20)
+print("[DEBUG] getMe status:", r.status_code)
+try:
+    print("[DEBUG] getMe resp:", r.json())
+except Exception:
+    print("[DEBUG] getMe text:", r.text)
 
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+if r.status_code != 200 or not r.json().get("ok"):
+    die("[FATAL] Token geçersiz görünüyor (getMe ok=false).")
 
-def send_telegram_message(message):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
-    requests.post(url, json=payload)
+# 3) Test mesajı gönder
+payload = {
+    "chat_id": CHAT_ID,
+    "text": "✅ Telegram testi: TRADER60 bot Railway'de aktif.",
+    "parse_mode": "Markdown"
+}
+s = requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json=payload, timeout=20)
+print("[DEBUG] sendMessage status:", s.status_code)
+try:
+    print("[DEBUG] sendMessage resp:", json.dumps(s.json(), ensure_ascii=False))
+except Exception:
+    print("[DEBUG] sendMessage text:", s.text)
 
-def get_signal(symbol, interval):
-    df = yf.download(symbol, period="7d", interval=interval)
-    if df.empty or len(df) < 14:
-        return None
+if s.status_code != 200 or not s.json().get("ok"):
+    die("[FATAL] sendMessage başarısız. CHAT_ID doğru mu? Bota /start attın mı?")
 
-    df['RSI'] = compute_rsi(df['Close'], 14)
-    last_rsi = df['RSI'].iloc[-1]
-
-    if last_rsi > 70:
-        return f"{symbol} ({interval}) → **Aşırı Alış** (RSI: {last_rsi:.2f})"
-    elif last_rsi < 30:
-        return f"{symbol} ({interval}) → **Aşırı Satış** (RSI: {last_rsi:.2f})"
-    else:
-        return f"{symbol} ({interval}) → Nötr (RSI: {last_rsi:.2f})"
-
-def compute_rsi(series, period):
-    delta = series.diff()
-    gain = delta.where(delta > 0, 0)
-    loss = -delta.where(delta < 0, 0)
-    avg_gain = gain.rolling(window=period).mean()
-    avg_loss = loss.rolling(window=period).mean()
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
-
-def main():
-    symbol = "BTC-USD"
-    intervals = ["5m", "15m", "30m", "1h", "4h"]
-
-    now = datetime.now().strftime("%d/%m/%Y %H:%M")
-    message = f"⏱ *BTC Sinyal Raporu* — {now}\n\n"
-
-    for interval in intervals:
-        signal = get_signal(symbol, interval)
-        if signal:
-            message += f"{signal}\n"
-
-    send_telegram_message(message)
-
-if __name__ == "__main__":
-    main()
+print("[OK] Telegram testi başarılı. Artık ana bota geçebiliriz.")
