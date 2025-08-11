@@ -29,7 +29,7 @@ TIMEFRAMES   = [t.strip() for t in os.getenv("TIMEFRAMES","5m,15m,30m,1h,4h").sp
 # ==== Semboller (geçerli olanlar) ====
 LIST_BIST = ["THYAO.IS","ASELS.IS","KCHOL.IS","TOASO.IS","TUPRS.IS","ULKER.IS","ENKAI.IS","GUBRF.IS"]
 LIST_FX   = ["USDTRY=X","EURTRY=X","EURUSD=X","GBPUSD=X","USDJPY=X"]
-LIST_IDX  = ["^N225","^IXIC","^GSPC","^FCHI","^RUT","^FTSE","^GDAXI","^SSMI","^DJI"]  # ^BIST100 yok
+LIST_IDX  = ["^N225","^IXIC","^GSPC","^FCHI","^RUT","^FTSE","^GDAXI","^SSMI","^DJI"]  # TR endeksleri YF'de yok
 LIST_COM  = ["GC=F","SI=F","BZ=F","CL=F"]  # Altın, Gümüş, Brent, WTI
 LIST_CR_USDT = [
     "BTCUSDT","ETHUSDT","XRPUSDT","SOLUSDT","ADAUSDT","SUIUSDT","BCHUSDT",
@@ -38,19 +38,22 @@ LIST_CR_USDT = [
 
 def _map_to_yf(sym: str) -> str:
     s = sym.strip()
+    # USDT pariteleri -> Yahoo formatı (BTC-USD)
     if s.endswith("USDT") and len(s) > 5:
-        return f"{s[:-4]}-USD"  # BTCUSDT -> BTC-USD
+        return f"{s[:-4]}-USD"
+    # UKOIL -> Yahoo Brent futures kodu
     if s.upper() == "UKOIL":
         return "BZ=F"
+    # Yahoo desteklemeyen TR endekslerini atla
     if s.upper() in {"^BIST100","^XU030"}:
-        return ""  # Yahoo desteklemiyor
+        return ""
     return s
 
 DEFAULT_SYMBOLS = (
     LIST_BIST + LIST_FX + LIST_IDX + LIST_COM +
     [_map_to_yf(s) for s in LIST_CR_USDT]
 )
-SYMBOLS = [s for s in DEFAULT_SYMBOLS if s]
+SYMBOLS = [s for s in DEFAULT_SYMBOLS if s]  # boşları at
 
 # ==== Debounce ====
 STATE_FILE = "state.json"
@@ -88,6 +91,99 @@ def tg_send(text: str):
         requests.post(url, json={"chat_id":CHAT_ID,"text":text,"parse_mode":"Markdown"}, timeout=20)
     except Exception as e:
         print("[TG ERROR]", e)
+
+# ==== BINANCE (kripto için birincil kaynak) ====
+BINANCE_BASE = "https://api.binance.com"
+BINANCE_TF_MAP = {"5m":"5m","15m":"15m","30m":"30m","1h":"1h","4h":"4h"}
+
+def fetch_binance_klines(binance_symbol: str, tf: str, limit: int = 500) -> pd.DataFrame:
+    """
+    Binance spot kline verisi -> OHLC DataFrame
+    """
+    interval = BINANCE_TF_MAP.get(tf, "1h")
+    url = f"{BINANCE_BASE}/api/v3/klines"
+    params = {"symbol": binance_symbol, "interval": interval, "limit": limit}
+    try:
+        r = requests.get(url, params=params, timeout=20)
+        r.raise_for_status()
+        raw = r.json()
+        if not raw: return pd.DataFrame()
+        rows = [{
+            "time": pd.to_datetime(k[0], unit="ms"),
+            "open": float(k[1]), "high": float(k[2]),
+            "low": float(k[3]),  "close": float(k[4]),
+            "volume": float(k[5]),
+        } for k in raw]
+        df = pd.DataFrame(rows).set_index("time")
+        return df
+    except Exception as e:
+        print(f"[BINANCE ERR] {binance_symbol} {tf}: {e}")
+        return pd.DataFrame()
+
+# ==== Veri çekme (kripto: Binance → fallback Yahoo, diğerleri: Yahoo normalize) ====
+def fetch(symbol, tf):
+    """
+    Kripto (…-USD) -> Önce Binance'te BASEUSDT denenir (BTC-USD -> BTCUSDT).
+    Olmazsa Yahoo fallback. Diğer tüm varlıklarda Yahoo + kolon normalizasyon.
+    """
+    # Kriptoysa Binance adayını hazırla
+    binance_candidate = None
+    if symbol.endswith("-USD") and len(symbol) > 5:
+        base = symbol[:-4]  # 'BTC-USD' -> 'BTC'
+        binance_candidate = f"{base}USDT"  # 'BTCUSDT'
+
+    # 1) Kripto: önce Binance
+    if binance_candidate:
+        dfb = fetch_binance_klines(binance_candidate, tf)
+        if dfb is not None and not dfb.empty:
+            return dfb
+
+    # 2) Yahoo fallback (tüm varlıklar)
+    tfmap = {"5m":("5m","10d"), "15m":("15m","30d"), "30m":("30m","60d"), "1h":("60m","60d"), "4h":("60m","60d")}
+    interval, period = tfmap.get(tf, ("60m","60d"))
+    try:
+        df = yf.download(symbol, interval=interval, period=period, progress=False, auto_adjust=False, threads=True)
+        if df is None or df.empty:
+            print(f"[INFO] Veri yok: {symbol} {tf}")
+            return pd.DataFrame()
+
+        # --- kolonları normalize et (MultiIndex dahil) ---
+        cols = []
+        for c in df.columns:
+            if isinstance(c, tuple):
+                parts = [str(x).strip().lower() for x in c if str(x).strip()]
+                if any(p in ("open","high","low","close","adj close","volume") for p in parts):
+                    cols.append(parts[0])
+                else:
+                    cols.append("_".join(parts))
+            else:
+                cols.append(str(c).strip().lower())
+        df.columns = cols
+
+        # --- gerekli kolonlar ---
+        need = {}
+        for key in ["open","high","low","close"]:
+            if key in df.columns:
+                need[key] = pd.to_numeric(df[key], errors="coerce")
+            elif key == "close" and "adj close" in df.columns:
+                need["close"] = pd.to_numeric(df["adj close"], errors="coerce")
+        df = pd.DataFrame(need)
+        if df.empty or df[["close"]].dropna().empty:
+            print(f"[INFO] Veri yok/eksik: {symbol} {tf}")
+            return pd.DataFrame()
+
+        # timezone & 4H resample
+        if getattr(df.index, "tz", None) is not None:
+            df.index = df.index.tz_localize(None)
+        if tf == "4h":
+            df = df.resample("4H").agg({"open":"first","high":"max","low":"min","close":"last"}).dropna(how="any")
+
+        df = df.dropna(subset=["close","high","low"])
+        return df
+
+    except Exception as e:
+        print(f"[FETCH ERR] {symbol} {tf}: {e}")
+        return pd.DataFrame()
 
 # ==== Göstergeler ====
 def _ema(s,n): return pd.Series(pd.to_numeric(s, errors="coerce")).ewm(span=n, adjust=False, min_periods=n).mean()
@@ -141,64 +237,6 @@ def ultimate_osc(h,l,c,s1=7,s2=14,s3=28):
 def roc(c,n=12): return (c/c.shift(n)-1)*100
 def bull_bear_power(h,l,c,n=13):
     ema=_ema(c,n); return h-ema, l-ema
-
-# ==== Veri çekme ====
-def fetch(symbol, tf):
-    tfmap = {"5m":("5m","10d"), "15m":("15m","30d"), "30m":("30m","60d"), "1h":("60m","60d"), "4h":("60m","60d")}
-    interval, period = tfmap.get(tf, ("60m","60d"))
-    try:
-        df = yf.download(sdef fetch(symbol, tf):
-    tfmap = {"5m":("5m","10d"), "15m":("15m","30d"), "30m":("30m","60d"), "1h":("60m","60d"), "4h":("60m","60d")}
-    interval, period = tfmap.get(tf, ("60m","60d"))
-
-    try:
-        df = yf.download(symbol, interval=interval, period=period, progress=False, auto_adjust=False, threads=True)
-        if df is None or df.empty:
-            print(f"[INFO] Veri yok: {symbol} {tf}")
-            return pd.DataFrame()
-
-        # 1) Kolonları normalize et (MultiIndex dahil)
-        cols = []
-        for c in df.columns:
-            if isinstance(c, tuple):
-                # ('Open', 'SYMB') -> 'open'
-                parts = [str(x).strip().lower() for x in c if str(x).strip()]
-                # 'open', 'high', 'low', 'close', 'adj close', 'volume' gibi anahtarları yakala
-                if any(p in ("open","high","low","close","adj close","volume") for p in parts):
-                    cols.append(parts[0])
-                else:
-                    cols.append("_".join(parts))
-            else:
-                cols.append(str(c).strip().lower())
-        df.columns = cols
-
-        # 2) Sadece gereken kolonları güvenle topla
-        need = {}
-        for key in ["open","high","low","close"]:
-            if key in df.columns:
-                need[key] = pd.to_numeric(df[key], errors="coerce")
-            else:
-                # bazı sembollerde 'adj close' tek geliyor, 'close' yoksa onu kullan
-                if key == "close" and "adj close" in df.columns:
-                    need["close"] = pd.to_numeric(df["adj close"], errors="coerce")
-        df = pd.DataFrame(need)
-        if df.empty or df[["close"]].dropna().empty:
-            print(f"[INFO] Veri yok/eksik: {symbol} {tf}")
-            return pd.DataFrame()
-
-        # 3) Zaman bölgesi & 4H resample
-        if getattr(df.index, "tz", None) is not None:
-            df.index = df.index.tz_localize(None)
-        if tf == "4h":
-            df = df.resample("4H").agg({"open":"first","high":"max","low":"min","close":"last"}).dropna(how="any")
-
-        # 4) Temizlik
-        df = df.dropna(subset=["close","high","low"])
-        return df
-
-    except Exception as e:
-        print(f"[FETCH ERR] {symbol} {tf}: {e}")
-        return pd.DataFrame()
 
 # ==== Skor & Özet ====
 def score_indicators(df):
