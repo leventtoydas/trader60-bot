@@ -147,19 +147,55 @@ def fetch(symbol, tf):
     tfmap = {"5m":("5m","10d"), "15m":("15m","30d"), "30m":("30m","60d"), "1h":("60m","60d"), "4h":("60m","60d")}
     interval, period = tfmap.get(tf, ("60m","60d"))
     try:
+        df = yf.download(sdef fetch(symbol, tf):
+    tfmap = {"5m":("5m","10d"), "15m":("15m","30d"), "30m":("30m","60d"), "1h":("60m","60d"), "4h":("60m","60d")}
+    interval, period = tfmap.get(tf, ("60m","60d"))
+
+    try:
         df = yf.download(symbol, interval=interval, period=period, progress=False, auto_adjust=False, threads=True)
         if df is None or df.empty:
             print(f"[INFO] Veri yok: {symbol} {tf}")
             return pd.DataFrame()
-        df = df.rename(columns=str.lower)
-        if getattr(df.index,"tz",None) is not None:
+
+        # 1) Kolonları normalize et (MultiIndex dahil)
+        cols = []
+        for c in df.columns:
+            if isinstance(c, tuple):
+                # ('Open', 'SYMB') -> 'open'
+                parts = [str(x).strip().lower() for x in c if str(x).strip()]
+                # 'open', 'high', 'low', 'close', 'adj close', 'volume' gibi anahtarları yakala
+                if any(p in ("open","high","low","close","adj close","volume") for p in parts):
+                    cols.append(parts[0])
+                else:
+                    cols.append("_".join(parts))
+            else:
+                cols.append(str(c).strip().lower())
+        df.columns = cols
+
+        # 2) Sadece gereken kolonları güvenle topla
+        need = {}
+        for key in ["open","high","low","close"]:
+            if key in df.columns:
+                need[key] = pd.to_numeric(df[key], errors="coerce")
+            else:
+                # bazı sembollerde 'adj close' tek geliyor, 'close' yoksa onu kullan
+                if key == "close" and "adj close" in df.columns:
+                    need["close"] = pd.to_numeric(df["adj close"], errors="coerce")
+        df = pd.DataFrame(need)
+        if df.empty or df[["close"]].dropna().empty:
+            print(f"[INFO] Veri yok/eksik: {symbol} {tf}")
+            return pd.DataFrame()
+
+        # 3) Zaman bölgesi & 4H resample
+        if getattr(df.index, "tz", None) is not None:
             df.index = df.index.tz_localize(None)
         if tf == "4h":
-            df = df.resample("4H").agg({"open":"first","high":"max","low":"min","close":"last","volume":"sum"}).dropna()
-        for col in ["open","high","low","close"]:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+            df = df.resample("4H").agg({"open":"first","high":"max","low":"min","close":"last"}).dropna(how="any")
+
+        # 4) Temizlik
         df = df.dropna(subset=["close","high","low"])
         return df
+
     except Exception as e:
         print(f"[FETCH ERR] {symbol} {tf}: {e}")
         return pd.DataFrame()
