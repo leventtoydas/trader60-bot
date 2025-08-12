@@ -4,15 +4,17 @@ from fastapi import FastAPI
 
 app = FastAPI()
 
-# Env-first, fallback to embedded values
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8294179459:AAH9416Z8a1U2xIORX8hJixGtixEDewYc7g")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "7881664904")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 def _log(s: str):
     print(s, flush=True)
 
 @app.on_event("startup")
 async def startup_event():
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        _log("[ERROR] Missing TELEGRAM_TOKEN or TELEGRAM_CHAT_ID env vars.")
+        return
     try:
         _log(f"[BOOT] CHAT_ID: {TELEGRAM_CHAT_ID}")
         _log("[BOOT] TOKEN tail: ********")
