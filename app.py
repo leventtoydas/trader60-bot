@@ -129,13 +129,33 @@ def analyze_list(name: str, tickers_csv: str):
     return "\n".join(lines)
 
 async def run_daily():
+    import traceback
+
     ts = datetime.datetime.now(ZoneInfo(TZ_NAME)).strftime("%Y-%m-%d %H:%M")
-    header = f"📈 TRADER60 — Günlük Analiz ({ts} {TZ_NAME})"
-    body1 = analyze_list("Hisseler", DEFAULT_STOCKS)
-    body2 = analyze_list("Endeksler", DEFAULT_INDICES)
-    body3 = analyze_list("Emtia/FX/Kripto", DEFAULT_COMMODS)
-    text = "\n\n".join([header, body1, body2, body3])
-    tg_send(text)
+    tg_send(f"📈 TRADER60 — Günlük Analiz başlıyor... ({ts} {TZ_NAME})")
+
+    try:
+        body1 = analyze_list("Hisseler", DEFAULT_STOCKS)
+        tg_send(body1)
+    except Exception as e:
+        tg_send(f"[ERR] Hisseler: {e}")
+        print(traceback.format_exc())
+
+    try:
+        body2 = analyze_list("Endeksler", DEFAULT_INDICES)
+        tg_send(body2)
+    except Exception as e:
+        tg_send(f"[ERR] Endeksler: {e}")
+        print(traceback.format_exc())
+
+    try:
+        body3 = analyze_list("Emtia/FX/Kripto", DEFAULT_COMMODS)
+        tg_send(body3)
+    except Exception as e:
+        tg_send(f"[ERR] Emtia: {e}")
+        print(traceback.format_exc())
+
+    tg_send("✅ TRADER60 — Günlük Analiz bitti.")
 
 @app.on_event("startup")
 async def startup_event():
