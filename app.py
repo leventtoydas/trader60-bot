@@ -74,18 +74,24 @@ def trend_signal(row):
     import pandas as pd
     import numpy as np
 
+    def safe_val(val):
+        try:
+            return float(val)
+        except:
+            return np.nan
+
+    close  = safe_val(row.get("Close",  np.nan))
+    sma8   = safe_val(row.get("SMA8",   np.nan))
+    sma20  = safe_val(row.get("SMA20",  np.nan))
+    sma50  = safe_val(row.get("SMA50",  np.nan))
+    sma200 = safe_val(row.get("SMA200", np.nan))
+    rsi    = safe_val(row.get("RSI14",  np.nan))
+    macd   = safe_val(row.get("MACD",   np.nan))
+    macds  = safe_val(row.get("MACDsig",np.nan))
+
     sigs = []
 
-    close  = row.get("Close",  np.nan)
-    sma8   = row.get("SMA8",   np.nan)
-    sma20  = row.get("SMA20",  np.nan)
-    sma50  = row.get("SMA50",  np.nan)
-    sma200 = row.get("SMA200", np.nan)
-    rsi    = row.get("RSI14",  np.nan)
-    macd   = row.get("MACD",   np.nan)
-    macds  = row.get("MACDsig",np.nan)
-
-    # Trend (Close, SMA50, SMA200 hepsi mevcutsa)
+    # Trend (Close > SMA50 > SMA200)
     if pd.notna(close) and pd.notna(sma50) and pd.notna(sma200):
         if close > sma50 and sma50 > sma200:
             sigs.append("Uptrend")
