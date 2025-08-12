@@ -1,15 +1,15 @@
-# TRADER60_CLEAN_DEPLOY
+# TRADER60_FAILSAFE
 
-Sıfırdan kurulum için temiz paket. Token gömülü değildir. Railway deploy olur olmaz Telegram'a bildirim atar.
+**Amaç:** Railway ister `Procfile` ile, ister yanlışlıkla `python main.py` ile başlatsın — her iki durumda da sorunsuz çalışsın.
 
 ## Dosyalar
-- app.py
-- requirements.txt
-- Procfile
-- README.md
+- `app.py` : FastAPI uygulaması (deploy'da Telegram bildirimi atar, /notify ve /health endpoint'leri var)
+- `main.py`: Uvicorn'i programatik başlatan failsafe runner
+- `Procfile`: Railway için standart başlatma komutu
+- `requirements.txt`
 
-## Kurulum (GitHub + Railway)
-1) Bu dosyaları boş bir GitHub repo'ya yükleyin.
+## Kurulum
+1) Bu dosyaları **boş** bir GitHub reposuna yükleyin.
 2) Railway → New Project → Deploy from GitHub Repo.
 3) Variables ekleyin:
 ```
@@ -17,9 +17,14 @@ TELEGRAM_TOKEN = <yeni token>
 TELEGRAM_CHAT_ID = <doğru chat_id>
 ```
 4) Rebuild without cache.
-5) Deploy biter bitmez Telegram'da "✅ TRADER60 — Deploy OK" mesajını görürsünüz.
-6) Manuel test: `.../notify` → bir bildirim daha gönderir.
 
-## Notlar
-- chat_id'yi doğrulamak için Telegram'da bota "ping" yazıp ardından `getUpdates` ile `message.chat.id` değerini alın.
-- Log'larda `sendMessage status/body` satırları her şeyi açıkça gösterir.
+## Beklenenler
+- Telegram'da: **“✅ TRADER60 — Deploy OK”**
+- Manuel test: `.../notify`
+- Loglarda:
+```
+[TG DEBUG] sendMessage status: 200
+[TG DEBUG] sendMessage body: {'ok': True, ...}
+```
+
+Her ihtimale karşı hem `Procfile` hem de `main.py` mevcut olduğu için, Railway yanlış start komutunda bile sorunsuz açılır.
