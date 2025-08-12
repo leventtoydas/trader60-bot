@@ -1,23 +1,16 @@
-# TRADER60_CLEAN_Railway (Env-only)
+# TRADER60_DEPLOY_NOTIFY
 
-Bu repo *token gömmeden* çalışır. Tüm gizli bilgiler **environment variable** olarak geçilmeli.
+Deploy olduğunda Telegram'a bildirim atar.
 
-## Gerekli Değişkenler
-- TELEGRAM_TOKEN
-- TELEGRAM_CHAT_ID
-
-## Railway Adımları
-1) New Project → Deploy from GitHub Repo
+## Kurulum
+1) Deploy from GitHub Repo veya Upload
 2) Variables:
 ```
 TELEGRAM_TOKEN = <yeni token>
-TELEGRAM_CHAT_ID = 7881664904
+TELEGRAM_CHAT_ID = <doğru chat_id>
 ```
 3) Rebuild without cache
-4) Loglarda şu satırları gör:
-```
-[BOOT] CHAT_ID: 7881664904
-[BOOT] TOKEN tail: ********
-[TG DEBUG] getMe status: 200 ve ok: true
-[TG DEBUG] status: 200 ve ok: true (sendMessage)
-```
+4) Deploy biter bitmez Telegram'da "✅ TRADER60 — Deploy OK" mesajını görmelisiniz.
+
+## Manuel Test
+`/notify` endpoint'ini açarak manuel bildirim gönderebilirsiniz.
