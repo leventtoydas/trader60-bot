@@ -1,7 +1,6 @@
 fastapi
 uvicorn
-requests
-yfinance
 pandas
-numpy
-apscheduler
+yfinance
+requests
+python-dateutil
