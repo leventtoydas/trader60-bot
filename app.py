@@ -71,40 +71,57 @@ def fetch_ticker(ticker: str, period="200d", interval="1d"):
         return None
 
 def trend_signal(row):
+    import pandas as pd
+    import numpy as np
+
     sigs = []
-    if row["Close"] > row["SMA50"] > row["SMA200"]:
-        sigs.append("Uptrend")
-    elif row["Close"] < row["SMA50"] < row["SMA200"]:
-        sigs.append("Downtrend")
-    # Crossovers
-    if row["SMA8"] > row["SMA20"]:
-        sigs.append("SMA8>20")
-    else:
-        sigs.append("SMA8<20")
-    # RSI zones
-    rsi = row.get("RSI14", np.nan)
+
+    close  = row.get("Close",  np.nan)
+    sma8   = row.get("SMA8",   np.nan)
+    sma20  = row.get("SMA20",  np.nan)
+    sma50  = row.get("SMA50",  np.nan)
+    sma200 = row.get("SMA200", np.nan)
+    rsi    = row.get("RSI14",  np.nan)
+    macd   = row.get("MACD",   np.nan)
+    macds  = row.get("MACDsig",np.nan)
+
+    # Trend (Close, SMA50, SMA200 hepsi mevcutsa)
+    if pd.notna(close) and pd.notna(sma50) and pd.notna(sma200):
+        if close > sma50 and sma50 > sma200:
+            sigs.append("Uptrend")
+        elif close < sma50 and sma50 < sma200:
+            sigs.append("Downtrend")
+
+    # SMA8 vs SMA20
+    if pd.notna(sma8) and pd.notna(sma20):
+        sigs.append("SMA8>20" if sma8 > sma20 else "SMA8<20")
+
+    # RSI
     if pd.notna(rsi):
-        if rsi >= 70: sigs.append("RSI↑70")
-        elif rsi <= 30: sigs.append("RSI↓30")
+        if rsi >= 70:
+            sigs.append("RSI↑70")
+        elif rsi <= 30:
+            sigs.append("RSI↓30")
+
     # MACD
-    if row["MACD"] > row["MACDsig"]:
-        sigs.append("MACD>Sig")
-    else:
-        sigs.append("MACD<Sig")
-    return ", ".join(sigs)
+    if pd.notna(macd) and pd.notna(macds):
+        sigs.append("MACD>Sig" if macd > macds else "MACD<Sig")
+
+    return ", ".join(sigs) if sigs else "NoSignal"
 
 def analyze_list(name: str, tickers_csv: str):
     lines = [f"*{name}*"]
     for t in [x.strip() for x in tickers_csv.split(",") if x.strip()]:
         df = fetch_ticker(t)
-        if df is None or df.empty:
-            lines.append(f"- {t}: veri yok")
+        if df is None or df.empty or len(df) < 200:
+            lines.append(f"- {t}: veri yok/az")
             continue
         last = df.iloc[-1]
         chg = (last["Close"] / df["Close"].iloc[-2] - 1.0) * 100 if len(df) > 1 else 0.0
         sig = trend_signal(last)
         lines.append(f"- {t}: {last['Close']:.2f} ({chg:+.2f}%) | {sig}")
     return "\n".join(lines)
+
 
 async def run_daily():
     ts = datetime.datetime.now(ZoneInfo(TZ_NAME)).strftime("%Y-%m-%d %H:%M")
