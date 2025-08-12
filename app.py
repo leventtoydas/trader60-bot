@@ -1,178 +1,115 @@
-import os, datetime, asyncio
-from zoneinfo import ZoneInfo
-
-import requests
-import yfinance as yf
+import os
 import pandas as pd
-import numpy as np
+import yfinance as yf
+import datetime
+from zoneinfo import ZoneInfo
 from fastapi import FastAPI
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
+import requests
+
+# ==== ENV AYARLARI ====
+TOKEN = os.getenv("TELEGRAM_TOKEN", "")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+TZ_NAME = os.getenv("TIMEZONE", "Europe/Istanbul")
+RUN_HOUR = int(os.getenv("RUN_HOUR", 9))
+RUN_MINUTE = int(os.getenv("RUN_MINUTE", 30))
+
+DEFAULT_STOCKS = os.getenv("STOCKS_CSV", "THYAO.IS,TOASO.IS,GUBRF.IS,ENKAI.IS,TUPRS.IS,ULKER.IS,KCHOL.IS,ASELS.IS").split(",")
+DEFAULT_INDICES = os.getenv("INDICES_CSV", "^XU100,^BIST30,^GSPC,^NDX,^DJI").split(",")
+DEFAULT_COMMODS = os.getenv("COMMODS_CSV", "XAUUSD=X,EURUSD=X,USDTRY=X,BZ=F,CL=F,BTC-USD").split(",")
 
 app = FastAPI()
 
-# --- ENV ---
-TELEGRAM_TOKEN = (os.getenv("TELEGRAM_TOKEN") or "").strip()
-TELEGRAM_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
-TZ_NAME = os.getenv("TIMEZONE", "Europe/Istanbul")
-RUN_HOUR = int(os.getenv("RUN_HOUR", "9"))
-RUN_MINUTE = int(os.getenv("RUN_MINUTE", "30"))
 
-# Defaults (Yahoo symbols)
-DEFAULT_STOCKS = os.getenv("STOCKS_CSV", "THYAO.IS,TOASO.IS,GUBRF.IS,ENKAI.IS,TUPRS.IS,ULKER.IS,KCHOL.IS,ASELS.IS")
-DEFAULT_INDICES = os.getenv("INDICES_CSV", "^XU100,^BIST30,^GSPC,^NDX,^DJI")
-DEFAULT_COMMODS = os.getenv("COMMODS_CSV", "XAUUSD=X,EURUSD=X,USDTRY=X,BZ=F,CL=F,BTC-USD")
-
-def log(s: str):
-    print(s, flush=True)
-
-def tg_send(text: str):
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        log("[ERROR] Missing TELEGRAM_TOKEN or TELEGRAM_CHAT_ID")
-        return False
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    r = requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text[:3900]}, timeout=20)
+# ==== TELEGRAM ====
+def tg_send(msg: str):
     try:
-        ok = r.json().get("ok", False)
-    except Exception:
-        ok = False
-    log(f"[TG] status={r.status_code} ok={ok}")
-    if not ok:
-        log(f"[TG] body={r.text}")
-    return ok
-
-def indicators(df: pd.DataFrame) -> pd.DataFrame:
-    close = df["Close"]
-    df["SMA8"] = close.rolling(8).mean()
-    df["SMA20"] = close.rolling(20).mean()
-    df["SMA50"] = close.rolling(50).mean()
-    df["SMA200"] = close.rolling(200).mean()
-    # RSI(14)
-    delta = close.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-    rs = gain / (loss.replace(0, np.nan))
-    df["RSI14"] = 100 - (100 / (1 + rs))
-    # MACD
-    ema12 = close.ewm(span=12, adjust=False).mean()
-    ema26 = close.ewm(span=26, adjust=False).mean()
-    df["MACD"] = ema12 - ema26
-    df["MACDsig"] = df["MACD"].ewm(span=9, adjust=False).mean()
-    return df
-
-def fetch_ticker(ticker: str, period="200d", interval="1d"):
-    try:
-        df = yf.download(ticker, period=period, interval=interval, progress=False, auto_adjust=False)
-        if df is None or df.empty:
-            return None
-        return indicators(df)
+        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        payload = {"chat_id": CHAT_ID, "text": msg}
+        r = requests.post(url, json=payload, timeout=10)
+        print(f"[TG] status={r.status_code} ok={r.json().get('ok')}")
     except Exception as e:
-        log(f"[ERR] fetch {ticker}: {e}")
-        return None
+        print(f"[TG ERROR] {e}")
 
-def trend_signal(row):
-    import pandas as pd
-    import numpy as np
 
-    def safe_val(val):
+# ==== ANALİZ ====
+def trend_signal(df: pd.DataFrame):
+    if df.empty:
+        return "Veri yok"
+    last = df.iloc[-1]
+    close = last["Close"]
+    sma50 = last["SMA50"]
+    sma200 = last["SMA200"]
+
+    try:
+        if pd.notna(close) and pd.notna(sma50) and pd.notna(sma200):
+            if close > sma50 > sma200:
+                return "📈 Yükseliş trendi"
+            elif close < sma50 < sma200:
+                return "📉 Düşüş trendi"
+            else:
+                return "➖ Kararsız"
+        else:
+            return "❓ Veri eksik"
+    except Exception as e:
+        return f"[ERR] {e}"
+
+
+def analyze_list(title: str, symbols: list):
+    msg = f"📊 {title}\n"
+    for sym in symbols:
         try:
-            return float(val)
-        except:
-            return np.nan
+            df = yf.download(sym, period="6mo", interval="1d", progress=False)
+            df["SMA50"] = df["Close"].rolling(50).mean()
+            df["SMA200"] = df["Close"].rolling(200).mean()
+            sig = trend_signal(df)
+            msg += f"{sym}: {sig}\n"
+        except Exception as e:
+            msg += f"{sym}: [ERR] {e}\n"
+    return msg
 
-    close  = safe_val(row.get("Close",  np.nan))
-    sma8   = safe_val(row.get("SMA8",   np.nan))
-    sma20  = safe_val(row.get("SMA20",  np.nan))
-    sma50  = safe_val(row.get("SMA50",  np.nan))
-    sma200 = safe_val(row.get("SMA200", np.nan))
-    rsi    = safe_val(row.get("RSI14",  np.nan))
-    macd   = safe_val(row.get("MACD",   np.nan))
-    macds  = safe_val(row.get("MACDsig",np.nan))
 
-    sigs = []
-
-    # Trend (Close > SMA50 > SMA200)
-    if pd.notna(close) and pd.notna(sma50) and pd.notna(sma200):
-        if close > sma50 and sma50 > sma200:
-            sigs.append("Uptrend")
-        elif close < sma50 and sma50 < sma200:
-            sigs.append("Downtrend")
-
-    # SMA8 vs SMA20
-    if pd.notna(sma8) and pd.notna(sma20):
-        sigs.append("SMA8>20" if sma8 > sma20 else "SMA8<20")
-
-    # RSI
-    if pd.notna(rsi):
-        if rsi >= 70:
-            sigs.append("RSI↑70")
-        elif rsi <= 30:
-            sigs.append("RSI↓30")
-
-    # MACD
-    if pd.notna(macd) and pd.notna(macds):
-        sigs.append("MACD>Sig" if macd > macds else "MACD<Sig")
-
-    return ", ".join(sigs) if sigs else "NoSignal"
-
-def analyze_list(name: str, tickers_csv: str):
-    lines = [f"*{name}*"]
-    for t in [x.strip() for x in tickers_csv.split(",") if x.strip()]:
-        df = fetch_ticker(t)
-        if df is None or df.empty or len(df) < 200:
-            lines.append(f"- {t}: veri yok/az")
-            continue
-        last = df.iloc[-1]
-        chg = (last["Close"] / df["Close"].iloc[-2] - 1.0) * 100 if len(df) > 1 else 0.0
-        sig = trend_signal(last)
-        lines.append(f"- {t}: {last['Close']:.2f} ({chg:+.2f}%) | {sig}")
-    return "\n".join(lines)
-
+# ==== GÜNLÜK ÇALIŞTIRMA ====
 async def run_daily():
-    import traceback
-
     ts = datetime.datetime.now(ZoneInfo(TZ_NAME)).strftime("%Y-%m-%d %H:%M")
-    tg_send(f"📈 TRADER60 — Günlük Analiz başlıyor... ({ts} {TZ_NAME})")
+    tg_send(f"📈 TRADER60 — Günlük Analiz ({ts} {TZ_NAME})")
 
-    try:
-        body1 = analyze_list("Hisseler", DEFAULT_STOCKS)
-        tg_send(body1)
-    except Exception as e:
-        tg_send(f"[ERR] Hisseler: {e}")
-        print(traceback.format_exc())
-
-    try:
-        body2 = analyze_list("Endeksler", DEFAULT_INDICES)
-        tg_send(body2)
-    except Exception as e:
-        tg_send(f"[ERR] Endeksler: {e}")
-        print(traceback.format_exc())
-
-    try:
-        body3 = analyze_list("Emtia/FX/Kripto", DEFAULT_COMMODS)
-        tg_send(body3)
-    except Exception as e:
-        tg_send(f"[ERR] Emtia: {e}")
-        print(traceback.format_exc())
+    tg_send(analyze_list("Hisseler", DEFAULT_STOCKS))
+    tg_send(analyze_list("Endeksler", DEFAULT_INDICES))
+    tg_send(analyze_list("Emtia/FX/Kripto", DEFAULT_COMMODS))
 
     tg_send("✅ TRADER60 — Günlük Analiz bitti.")
 
-@app.on_event("startup")
-async def startup_event():
-    # Schedule daily job 09:30 Europe/Istanbul (vars)
-    scheduler = AsyncIOScheduler(timezone=TZ_NAME)
-    trigger = CronTrigger(hour=RUN_HOUR, minute=RUN_MINUTE)
-    scheduler.add_job(run_daily, trigger, id="daily")
-    scheduler.start()
-    # Send deploy ping
-    ts = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-    tg_send(f"✅ TRADER60 — Worker aktif (cron {RUN_HOUR:02d}:{RUN_MINUTE:02d} {TZ_NAME})\n⏱ {ts}")
+
+# ==== ENDPOINTS ====
+@app.get("/health")
+def health():
+    return {"ok": True, "tz": TZ_NAME, "hour": RUN_HOUR, "minute": RUN_MINUTE}
+
+
+@app.get("/notify")
+def notify():
+    tg_send("🔔 TRADER60 — Manuel test bildirimi")
+    return {"ok": True}
+
 
 @app.get("/run-now")
 async def run_now():
     await run_daily()
     return {"ok": True}
 
-@app.get("/health")
-def health():
-    return {"ok": True, "tz": TZ_NAME, "hour": RUN_HOUR, "minute": RUN_MINUTE}
+
+# ==== OTOMATİK ÇALIŞTIRMA ====
+import asyncio
+
+async def scheduler():
+    while True:
+        now = datetime.datetime.now(ZoneInfo(TZ_NAME))
+        if now.hour == RUN_HOUR and now.minute == RUN_MINUTE:
+            await run_daily()
+            await asyncio.sleep(60)
+        await asyncio.sleep(1)
+
+@app.on_event("startup")
+async def startup_event():
+    tg_send("✅ TRADER60 — Worker aktif...")
+    asyncio.create_task(scheduler())
