@@ -32,49 +32,47 @@ def tg_send(msg: str):
 
 
 # ==== ANALİZ ====
-def trend_signal_from_vals(close, sma20, sma50, sma200, rsi=None):
-    """
-    Basit ama sağlam sinyal seti:
-      - Güçlü Al: 50 > 200 ve fiyat 50 & 20 üstünde
-      - Al      : 50 > 200 ve fiyat 50 veya 20 üstünde
-      - Güçlü Sat: 50 < 200 ve fiyat 50 & 20 altında
-      - Sat     : 50 < 200 ve fiyat 50 veya 20 altında
-      - Nötr    : Diğer
-    RSI yardımcı işaret olarak eklenir (>=70 aşırı alım, <=30 aşırı satım)
-    """
-    import math
-    def ok(x): return (x is not None) and (not (isinstance(x, float) and math.isnan(x)))
-
-    tag = "Nötr"
-    if ok(sma50) and ok(sma200) and ok(close):
-        if sma50 > sma200:
-            if ok(sma20) and close > sma50 and close > sma20:
-                tag = "Güçlü Al"
-            elif (ok(sma20) and (close > sma50 or close > sma20)) or (not ok(sma20) and close > sma50):
-                tag = "Al"
-        elif sma50 < sma200:
-            if ok(sma20) and close < sma50 and close < sma20:
-                tag = "Güçlü Sat"
-            elif (ok(sma20) and (close < sma50 or close < sma20)) or (not ok(sma20) and close < sma50):
-                tag = "Sat"
-
-    # RSI etiketi (ipucu)
-    if rsi is not None and not math.isnan(rsi):
-        if rsi >= 70: tag += " · RSI↑70"
-        elif rsi <= 30: tag += " · RSI↓30"
-
-    return tag
-
-
 def analyze_list(title: str, symbols: list):
+    import numpy as np
     msg = f"📊 {title}\n"
     for sym in symbols:
+        sym = sym.strip()
+        if not sym: 
+            continue
         try:
-            df = yf.download(sym, period="6mo", interval="1d", progress=False)
-            df["SMA50"] = df["Close"].rolling(50).mean()
-            df["SMA200"] = df["Close"].rolling(200).mean()
-            sig = trend_signal(df)
-            msg += f"{sym}: {sig}\n"
+            df = yf.download(sym, period="200d", interval="1d", progress=False)
+            if df is None or df.empty or len(df) < 60:
+                msg += f"{sym}: veri yok/az\n"
+                continue
+
+            # İndikatörler
+            close = df["Close"].astype(float)
+            sma20 = close.rolling(20).mean()
+            sma50 = close.rolling(50).mean()
+            sma200 = close.rolling(200).mean()
+
+            # RSI(14)
+            delta = close.diff()
+            gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+            rs = gain / (loss.replace(0, np.nan))
+            rsi14 = 100 - (100 / (1 + rs))
+
+            # Son değerleri güvenli şekilde skalar al
+            c  = float(close.iloc[-1])
+            s20 = float(sma20.iloc[-1]) if not np.isnan(sma20.iloc[-1]) else None
+            s50 = float(sma50.iloc[-1]) if not np.isnan(sma50.iloc[-1]) else None
+            s200 = float(sma200.iloc[-1]) if not np.isnan(sma200.iloc[-1]) else None
+            rsi = float(rsi14.iloc[-1]) if not np.isnan(rsi14.iloc[-1]) else None
+
+            # Günlük değişim
+            chg = 0.0
+            if len(close) > 1 and close.iloc[-2] != 0:
+                chg = (c / float(close.iloc[-2]) - 1.0) * 100.0
+
+            signal = trend_signal_from_vals(c, s20, s50, s200, rsi)
+            msg += f"{sym}: {c:.2f} ({chg:+.2f}%) — {signal}\n"
+
         except Exception as e:
             msg += f"{sym}: [ERR] {e}\n"
     return msg
