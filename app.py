@@ -122,7 +122,6 @@ def analyze_list(name: str, tickers_csv: str):
         lines.append(f"- {t}: {last['Close']:.2f} ({chg:+.2f}%) | {sig}")
     return "\n".join(lines)
 
-
 async def run_daily():
     ts = datetime.datetime.now(ZoneInfo(TZ_NAME)).strftime("%Y-%m-%d %H:%M")
     header = f"📈 TRADER60 — Günlük Analiz ({ts} {TZ_NAME})"
