@@ -1,30 +1,24 @@
-# TRADER60_FAILSAFE
+# TRADER60_ANALYTICS_DAILY
 
-**Amaç:** Railway ister `Procfile` ile, ister yanlışlıkla `python main.py` ile başlatsın — her iki durumda da sorunsuz çalışsın.
+Günlük (09:30 Europe/Istanbul) teknik analiz üretir ve Telegram'a gönderir.
+- SMA(8/20/50/200), RSI(14), MACD sinyalleri
+- Hisse/Endeks/Emtia listeleri ENV'den özelleştirilebilir
+- Manuel tetik: `/run-now`
 
-## Dosyalar
-- `app.py` : FastAPI uygulaması (deploy'da Telegram bildirimi atar, /notify ve /health endpoint'leri var)
-- `main.py`: Uvicorn'i programatik başlatan failsafe runner
-- `Procfile`: Railway için standart başlatma komutu
-- `requirements.txt`
-
-## Kurulum
-1) Bu dosyaları **boş** bir GitHub reposuna yükleyin.
-2) Railway → New Project → Deploy from GitHub Repo.
-3) Variables ekleyin:
+## ENV
 ```
-TELEGRAM_TOKEN = <yeni token>
-TELEGRAM_CHAT_ID = <doğru chat_id>
-```
-4) Rebuild without cache.
-
-## Beklenenler
-- Telegram'da: **“✅ TRADER60 — Deploy OK”**
-- Manuel test: `.../notify`
-- Loglarda:
-```
-[TG DEBUG] sendMessage status: 200
-[TG DEBUG] sendMessage body: {'ok': True, ...}
+TELEGRAM_TOKEN=<zorunlu>
+TELEGRAM_CHAT_ID=<zorunlu>
+TIMEZONE=Europe/Istanbul
+RUN_HOUR=9
+RUN_MINUTE=30
+STOCKS_CSV=THYAO.IS,TOASO.IS,GUBRF.IS,ENKAI.IS,TUPRS.IS,ULKER.IS,KCHOL.IS,ASELS.IS
+INDICES_CSV=^XU100,^BIST30,^GSPC,^NDX,^DJI
+COMMODS_CSV=XAUUSD=X,EURUSD=X,USDTRY=X,BZ=F,CL=F,BTC-USD
 ```
 
-Her ihtimale karşı hem `Procfile` hem de `main.py` mevcut olduğu için, Railway yanlış start komutunda bile sorunsuz açılır.
+## Deploy
+1) Repo'ya yükleyin, Railway'de env'leri girin.
+2) Rebuild without cache.
+3) Telegram'da deploy bildirimi görünür.
+4) Hemen test için `.../run-now` çağırın.
