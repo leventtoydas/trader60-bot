@@ -32,26 +32,38 @@ def tg_send(msg: str):
 
 
 # ==== ANALİZ ====
-def trend_signal(df: pd.DataFrame):
-    if df.empty:
-        return "Veri yok"
-    last = df.iloc[-1]
-    close = last["Close"]
-    sma50 = last["SMA50"]
-    sma200 = last["SMA200"]
+def trend_signal_from_vals(close, sma20, sma50, sma200, rsi=None):
+    """
+    Basit ama sağlam sinyal seti:
+      - Güçlü Al: 50 > 200 ve fiyat 50 & 20 üstünde
+      - Al      : 50 > 200 ve fiyat 50 veya 20 üstünde
+      - Güçlü Sat: 50 < 200 ve fiyat 50 & 20 altında
+      - Sat     : 50 < 200 ve fiyat 50 veya 20 altında
+      - Nötr    : Diğer
+    RSI yardımcı işaret olarak eklenir (>=70 aşırı alım, <=30 aşırı satım)
+    """
+    import math
+    def ok(x): return (x is not None) and (not (isinstance(x, float) and math.isnan(x)))
 
-    try:
-        if pd.notna(close) and pd.notna(sma50) and pd.notna(sma200):
-            if close > sma50 > sma200:
-                return "📈 Yükseliş trendi"
-            elif close < sma50 < sma200:
-                return "📉 Düşüş trendi"
-            else:
-                return "➖ Kararsız"
-        else:
-            return "❓ Veri eksik"
-    except Exception as e:
-        return f"[ERR] {e}"
+    tag = "Nötr"
+    if ok(sma50) and ok(sma200) and ok(close):
+        if sma50 > sma200:
+            if ok(sma20) and close > sma50 and close > sma20:
+                tag = "Güçlü Al"
+            elif (ok(sma20) and (close > sma50 or close > sma20)) or (not ok(sma20) and close > sma50):
+                tag = "Al"
+        elif sma50 < sma200:
+            if ok(sma20) and close < sma50 and close < sma20:
+                tag = "Güçlü Sat"
+            elif (ok(sma20) and (close < sma50 or close < sma20)) or (not ok(sma20) and close < sma50):
+                tag = "Sat"
+
+    # RSI etiketi (ipucu)
+    if rsi is not None and not math.isnan(rsi):
+        if rsi >= 70: tag += " · RSI↑70"
+        elif rsi <= 30: tag += " · RSI↓30"
+
+    return tag
 
 
 def analyze_list(title: str, symbols: list):
