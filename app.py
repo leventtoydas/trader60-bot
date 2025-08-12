@@ -40,7 +40,7 @@ def analyze_list(title: str, symbols: list):
         if not sym: 
             continue
         try:
-            df = yf.download(sym, period="200d", interval="1d", progress=False)
+            df = yf.download(sym, period="200d", interval="1d", progress=False, auto_adjust=True)
             if df is None or df.empty or len(df) < 60:
                 msg += f"{sym}: veri yok/az\n"
                 continue
@@ -59,11 +59,11 @@ def analyze_list(title: str, symbols: list):
             rsi14 = 100 - (100 / (1 + rs))
 
             # Son değerleri güvenli şekilde skalar al
-            c  = float(close.iloc[-1])
-            s20 = float(sma20.iloc[-1]) if not np.isnan(sma20.iloc[-1]) else None
-            s50 = float(sma50.iloc[-1]) if not np.isnan(sma50.iloc[-1]) else None
-            s200 = float(sma200.iloc[-1]) if not np.isnan(sma200.iloc[-1]) else None
-            rsi = float(rsi14.iloc[-1]) if not np.isnan(rsi14.iloc[-1]) else None
+            c   = None if pd.isna(close.iloc[-1])  else float(close.iloc[-1].item())
+            s20 = None if pd.isna(sma20.iloc[-1])  else float(sma20.iloc[-1].item())
+            s50 = None if pd.isna(sma50.iloc[-1])  else float(sma50.iloc[-1].item())
+            s200= None if pd.isna(sma200.iloc[-1]) else float(sma200.iloc[-1].item())
+            rsi = None if pd.isna(rsi14.iloc[-1])  else float(rsi14.iloc[-1].item())
 
             # Günlük değişim
             chg = 0.0
