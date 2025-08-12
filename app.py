@@ -11,8 +11,8 @@ def log(s):
 
 def tg_send(text: str):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        log("[ERROR] Missing TELEGRAM_TOKEN or TELEGRAM_CHAT_ID")
-        return False
+    log("[ERROR] Missing TELEGRAM_TOKEN or TELEGRAM_CHAT_ID")
+    return False
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     r = requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text}, timeout=12)
     log(f"[TG DEBUG] sendMessage status: {r.status_code}")
