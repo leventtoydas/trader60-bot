@@ -1,5 +1,4 @@
-import os
-import requests
+import os, datetime, requests
 from fastapi import FastAPI
 
 app = FastAPI()
@@ -7,30 +6,31 @@ app = FastAPI()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-def _log(s: str):
+def log(s): 
     print(s, flush=True)
+
+def tg_send(text: str):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        log("[ERROR] Missing TELEGRAM_TOKEN or TELEGRAM_CHAT_ID")
+        return False
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    r = requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text}, timeout=12)
+    log(f"[TG DEBUG] sendMessage status: {r.status_code}")
+    log(f"[TG DEBUG] sendMessage body: {r.text}")
+    return r.status_code == 200 and r.json().get("ok", False)
 
 @app.on_event("startup")
 async def startup_event():
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        _log("[ERROR] Missing TELEGRAM_TOKEN or TELEGRAM_CHAT_ID env vars.")
-        return
-    try:
-        _log(f"[BOOT] CHAT_ID: {TELEGRAM_CHAT_ID}")
-        _log("[BOOT] TOKEN tail: ********")
-        r1 = requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getMe", timeout=10)
-        ok1 = r1.json().get("ok", False) if r1.status_code == 200 else False
-        _log(f"[TG DEBUG] getMe status: {r1.status_code} ve ok: {str(ok1).lower()}")
-        payload = {
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": "✅ TRADER60 DEBUG — başlangıç testi (Markdown OFF)."
-        }
-        r2 = requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json=payload, timeout=10)
-        ok2 = r2.json().get("ok", False) if r2.status_code == 200 else False
-        _log(f"[TG DEBUG] status: {r2.status_code} ve ok: {str(ok2).lower()} (sendMessage)")
-    except Exception as e:
-        _log(f"[ERROR] Startup error: {e}")
+    # Deploy/Restart bildirimi
+    ts = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    msg = f"✅ TRADER60 — Deploy OK\n⏱ {ts}\n🔧 Env: TOKEN={'OK' if TELEGRAM_TOKEN else 'MISSING'}, CHAT_ID={TELEGRAM_CHAT_ID or 'MISSING'}"
+    tg_send(msg)
 
+@app.get("/notify")
+def notify():
+    # Manuel test için: .../notify aç → Telegram’a test düşer
+    return {"ok": tg_send("🔔 TRADER60 — Manuel test bildirimi")}
+    
 @app.get("/health")
 def health():
-    return {"ok": True, "chat_id": TELEGRAM_CHAT_ID}
+    return {"ok": True, "has_token": bool(TELEGRAM_TOKEN), "chat_id": TELEGRAM_CHAT_ID}
